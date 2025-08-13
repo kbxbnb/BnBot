@@ -1,3 +1,5 @@
+import sys, os
+sys.path.insert(0, os.path.dirname(__file__))
 import os, time, json, sqlite3, pytz, requests
 from datetime import timezone
 from dateutil import parser

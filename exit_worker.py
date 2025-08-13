@@ -1,3 +1,5 @@
+import sys, os
+sys.path.insert(0, os.path.dirname(__file__))
 import time, os, sqlite3
 from datetime import datetime
 import pytz

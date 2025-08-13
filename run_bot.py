@@ -1,3 +1,5 @@
+import sys, os
+sys.path.insert(0, os.path.dirname(__file__))
 import time
 from pipeline import run_pipeline_once
 import db_bootstrap  # executes and creates tables on import
