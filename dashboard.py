@@ -277,44 +277,9 @@ with tab_bt:
     else:
         st.info("Run a backtest to see results here.")
 
+import logs_tab
 with tab_logs:
-    st.subheader("📜 Application Logs (DB)")
-    if hasattr(st, "autorefresh"): st.autorefresh(interval=30_000, key="logs_refresh")
-    try:
-        q_pair = '''
-          SELECT timestamp, event, message
-          FROM logs
-          WHERE component='benzinga' AND event IN ('REQUEST','RESPONSE')
-          ORDER BY id DESC LIMIT 2
-        '''
-        df_pair = pd.read_sql(q_pair, conn)
-        if not df_pair.empty:
-            st.markdown("### 🛰️ Latest Benzinga API Call")
-            for _, row in df_pair.iterrows():
-                st.code(f"{row['timestamp']}  {row['event']}\n{row['message']}", language="json")
-        else:
-            st.info("No Benzinga API logs yet.")
-    except Exception as e:
-        st.warning(f"Failed to load latest API logs: {e}")
-    st.markdown("---")
-    level = st.selectbox("Level", ["All","API","INFO","ERROR"])
-    comp  = st.selectbox("Component", ["All","benzinga","pipeline","trader","backtest"])
-    where = []
-    if level != "All": where.append(f"level='{level}'")
-    if comp  != "All": where.append(f"component='{comp}'")
-    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
-    q_all = f'''
-      SELECT timestamp, level, component, event, message, ticker
-      FROM logs
-      {where_sql}
-      ORDER BY id DESC
-      LIMIT 500
-    '''
-    try:
-        df_logs = pd.read_sql(q_all, conn)
-        st.dataframe(df_logs, height=420, use_container_width=True)
-    except Exception as e:
-        st.warning(f"Failed to load logs: {e}")
+    logs_tab.render(conn)
 
 with tab_heatmap:
     st.subheader("🌡️ News Sentiment Heatmap (7 days)")
