@@ -1,3 +1,4 @@
+import db_bootstrap  # executes and creates tables on import
 import time
 from pipeline import run_pipeline_once
 

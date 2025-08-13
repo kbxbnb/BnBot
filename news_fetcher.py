@@ -1,3 +1,4 @@
+import db_bootstrap  # executes and creates tables on import
 import os, time, json, sqlite3, pytz, requests
 from datetime import timezone
 from dateutil import parser

@@ -2,6 +2,7 @@ import os, sqlite3
 from datetime import datetime, timedelta
 import pandas as pd
 import pytz
+import db_bootstrap  # executes and creates tables on import
 import streamlit as st
 from utils.price import fetch_intraday_bars
 
