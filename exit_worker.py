@@ -3,6 +3,7 @@ from datetime import datetime
 import pytz
 from utils.price import fetch_intraday_bars
 from utils.alerts import send_email, send_telegram
+import db_bootstrap  # executes and creates tables on import
 
 DB_PATH = "data/trades.db"
 PAC = pytz.timezone("US/Pacific")

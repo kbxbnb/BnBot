@@ -1,6 +1,6 @@
-import db_bootstrap  # executes and creates tables on import
 import time
 from pipeline import run_pipeline_once
+import db_bootstrap  # executes and creates tables on import
 
 if __name__ == "__main__":
     print("🚀 BnBot pipeline running every 10 seconds")

@@ -1,10 +1,11 @@
+# db_bootstrap.py
 import os, sqlite3
 
 os.makedirs("data", exist_ok=True)
 conn = sqlite3.connect("data/trades.db")
 cur = conn.cursor()
 
-# Core tables
+# Logs
 cur.execute("""
 CREATE TABLE IF NOT EXISTS logs (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -17,6 +18,7 @@ CREATE TABLE IF NOT EXISTS logs (
 )
 """)
 
+# News
 cur.execute("""
 CREATE TABLE IF NOT EXISTS news (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -29,6 +31,7 @@ CREATE TABLE IF NOT EXISTS news (
 )
 """)
 
+# Trades
 cur.execute("""
 CREATE TABLE IF NOT EXISTS trades (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -51,13 +54,14 @@ CREATE TABLE IF NOT EXISTS trades (
 )
 """)
 
-cur.execute("""
-CREATE TABLE IF NOT EXISTS settings (
-  key TEXT PRIMARY KEY,
-  value TEXT
-)
-""")
+# Settings
+cur.execute("""CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT)""")
+cur.execute("INSERT OR IGNORE INTO settings(key,value) VALUES('capital_mode','percent')")
+cur.execute("INSERT OR IGNORE INTO settings(key,value) VALUES('capital_value','10')")
+cur.execute("INSERT OR IGNORE INTO settings(key,value) VALUES('account_size','100000')")
+cur.execute("INSERT OR IGNORE INTO settings(key,value) VALUES('paper_trading','true')")
 
+# Capital usage
 cur.execute("""
 CREATE TABLE IF NOT EXISTS capital_usage (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,29 +71,7 @@ CREATE TABLE IF NOT EXISTS capital_usage (
 )
 """)
 
-# Ensure new columns exist on old DBs
-def ensure_column(table, column, coltype):
-    cur.execute("PRAGMA table_info(%s)" % table)
-    cols = [row[1] for row in cur.fetchall()]
-    if column not in cols:
-        cur.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype}")
-
-ensure_column("trades", "peak_price", "REAL")
-ensure_column("trades", "trailing_stop_loss", "REAL")
-ensure_column("trades", "market_close_exit", "INTEGER")
-
-# Defaults
-cur.execute("INSERT OR IGNORE INTO settings(key,value) VALUES('capital_mode','percent')")
-cur.execute("INSERT OR IGNORE INTO settings(key,value) VALUES('capital_value','10')")
-cur.execute("INSERT OR IGNORE INTO settings(key,value) VALUES('account_size','100000')")
-cur.execute("INSERT OR IGNORE INTO settings(key,value) VALUES('paper_trading','true')")
-
-conn.commit()
-conn.close()
-print("✅ DB tables/columns ensured.")
-
-
-# Trade events audit table (e.g., TSL changes, manual exits)
+# Trade events (audit: TSL changes, manual exit, etc.)
 cur.execute("""
 CREATE TABLE IF NOT EXISTS trade_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -100,3 +82,8 @@ CREATE TABLE IF NOT EXISTS trade_events (
   ts TEXT
 )
 """)
+
+conn.commit()
+conn.close()
+
+# Importing this module is enough to ensure the DB exists.

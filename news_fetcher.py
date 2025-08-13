@@ -1,8 +1,8 @@
-import db_bootstrap  # executes and creates tables on import
 import os, time, json, sqlite3, pytz, requests
 from datetime import timezone
 from dateutil import parser
 from utils.logging import log_db
+import db_bootstrap  # executes and creates tables on import
 
 DB_PATH = "data/trades.db"
 BENZINGA_API_KEY = (
