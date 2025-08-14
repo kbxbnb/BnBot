@@ -1,0 +1,32 @@
+# Core
+streamlit
+pandas
+numpy
+python-dateutil
+requests
+xmltodict
+
+# Database
+sqlite-utils
+
+# Plotting & Visualization
+plotly
+matplotlib
+
+# Broker Integration
+alpaca-trade-api
+
+# NLP & Sentiment Analysis
+transformers
+torch
+vaderSentiment
+
+# Backtesting & Analysis
+ta
+scipy
+
+# Timezone handling
+pytz
+
+# Optional (if you use dotenv for local development)
+python-dotenv
