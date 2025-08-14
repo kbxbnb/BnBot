@@ -41,7 +41,7 @@ tab_today, tab_prev, tab_bt, tab_logs, tab_heatmap, tab_settings = st.tabs([
 ])
 
 with tab_logs:
-logs_tab.render(conn)
+	logs_tab.render(conn)
 
 # --- SETTINGS TAB ---
 with tab_settings:
