@@ -7,6 +7,7 @@ import pytz
 import db_bootstrap  # executes and creates tables on import
 import streamlit as st
 from utils.price import fetch_intraday_bars
+import logs_tab
 
 st.set_page_config(page_title="BnBot Dashboard", layout="wide")
 os.makedirs("data", exist_ok=True)
@@ -38,6 +39,9 @@ except Exception as e:
 tab_today, tab_prev, tab_bt, tab_logs, tab_heatmap, tab_settings = st.tabs([
     "🗓️ Today","📁 Skipped / Closed Trades","📉 Run Backtest","📜 Logs","🌡️ Heatmap","⚙️ Settings"
 ])
+
+with tab_logs:
+logs_tab.render(conn)
 
 # --- SETTINGS TAB ---
 with tab_settings:
