@@ -54,11 +54,21 @@ def save_news_rows(articles):
             news_time_pt = to_pt_str(news_time_iso)
         except Exception:
             continue
+
+        # ✅ Sanitize stock tickers
+        clean_stocks = []
         for t in stocks:
-            ticker = (t or "").upper().strip()
+            if isinstance(t, str):
+                clean_stocks.append(t.upper().strip())
+            elif isinstance(t, dict):
+                # Try extracting text from dict if it has one
+                val = t.get("#text") or t.get("value") or ""
+                if val:
+                    clean_stocks.append(val.upper().strip())
+
+        for ticker in clean_stocks:
             if not ticker:
                 continue
-            # de-dupe by (ticker, headline)
             cur.execute("SELECT 1 FROM news WHERE ticker=? AND headline=?", (ticker, headline))
             if cur.fetchone():
                 continue
@@ -70,7 +80,8 @@ def save_news_rows(articles):
                 (ticker, headline, None, None, "benzinga", news_time_pt)
             )
             inserted += 1
-    conn.commit(); conn.close()
+    conn.commit()
+    conn.close()
     return inserted
 
 def _parse_json_or_xml(resp):
