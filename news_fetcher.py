@@ -5,6 +5,7 @@ from datetime import timezone
 from dateutil import parser
 from utils.logging import log_db
 import db_bootstrap  # executes and creates tables on import
+import xmltodict
 
 DB_PATH = "data/trades.db"
 BENZINGA_API_KEY = (
@@ -78,7 +79,11 @@ def fetch_and_log_once():
         "token": BENZINGA_API_KEY,
         "pagesize": 50,
         "display_tickers": "true",
+        "format": "json",                 # <--- force JSON
     }
+    
+    headers = {"Accept": "application/json"}  # <--- hint content type
+    
     # Log outgoing request
     try:
         log_db("API", "benzinga", "REQUEST", json.dumps({"url": url, "params": params}))
@@ -89,38 +94,76 @@ def fetch_and_log_once():
         log_db("ERROR", "benzinga", "REQUEST_ERROR", f"{type(e).__name__}: {e}")
         return
 
-    # Parse & log response
+# Parse & log the response summary
+try:
+    articles = None
+    # Try JSON first
     try:
         data = resp.json()
         if isinstance(data, dict) and "articles" in data:
-            articles = data.get("articles", [])
-        else:
-            articles = data if isinstance(data, list) else []
+            articles = data.get("articles") or []
+        elif isinstance(data, list):
+            articles = data
+    except Exception:
+        articles = None
 
-        titles_sample = [(a.get("title") or a.get("headline") or "") for a in articles[:5]]
-        log_db("API", "benzinga", "RESPONSE", json.dumps({
-            "request_url": resp.request.url,
-            "status": resp.status_code,
-            "elapsed_ms": elapsed_ms,
-            "items": len(articles),
-            "titles_sample": titles_sample
-        }))
-
-        if resp.status_code != 200:
-            log_db("ERROR", "benzinga", "RESPONSE_ERROR",
-                   json.dumps({"status": resp.status_code, "body": resp.text[:800]}))
+    # Fallback to XML if JSON failed or empty
+    if articles is None or len(articles) == 0:
+        try:
+            parsed = xmltodict.parse(resp.text)
+            # Typical shape: result -> item (list)
+            items = parsed.get("result", {}).get("item", [])
+            if isinstance(items, dict):  # single item case
+                items = [items]
+            # Normalize XML items to the JSON-like dicts our saver expects
+            articles = []
+            for it in items:
+                # headline/title
+                title = it.get("title") or ""
+                # tickers (if any) are usually under <stocks><item>...</item></stocks>
+                stocks = []
+                stocks_xml = (it.get("stocks") or {}).get("item")
+                if isinstance(stocks_xml, list):
+                    stocks = [s for s in stocks_xml if s]
+                elif isinstance(stocks_xml, str):
+                    stocks = [stocks_xml]
+                # published/created string e.g., "Thu, 14 Aug 2025 03:54:09 -0400"
+                created = it.get("created") or it.get("updated") or ""
+                articles.append({
+                    "title": title,
+                    "stocks": stocks,
+                    "created": created,
+                    "headline": title,
+                })
+        except Exception as xe:
+            # Could not parse XML either
+            log_db("ERROR", "benzinga", "PARSE_ERROR",
+                   json.dumps({"error": f"{type(xe).__name__}: {xe}",
+                               "status": resp.status_code,
+                               "body_snip": resp.text[:800]}))
             return
 
-        inserted = save_news_rows(articles)
-        log_db("INFO", "benzinga", "INGEST_SUMMARY", f"Inserted {inserted} news rows.")
-    except Exception as e:
-        body_snip = None
-        try:
-            body_snip = resp.text[:800]
-        except Exception:
-            pass
-        log_db("ERROR", "benzinga", "PARSE_ERROR",
-               json.dumps({"error": f"{type(e).__name__}: {e}", "body_snip": body_snip}))
+    titles_sample = [(a.get("title") or a.get("headline") or "") for a in (articles or [])[:5]]
+    log_db("API", "benzinga", "RESPONSE", json.dumps({
+        "request_url": resp.request.url,
+        "status": resp.status_code,
+        "elapsed_ms": elapsed_ms,
+        "items": len(articles or []),
+        "titles_sample": titles_sample
+    }))
+
+    if resp.status_code != 200:
+        log_db("ERROR", "benzinga", "RESPONSE_ERROR",
+               json.dumps({"status": resp.status_code, "body": resp.text[:800]}))
+        return
+
+    inserted = save_news_rows(articles or [])
+    log_db("INFO", "benzinga", "INGEST_SUMMARY", f"Inserted {inserted} news rows.")
+except Exception as e:
+    log_db("ERROR", "benzinga", "PARSE_ERROR",
+           json.dumps({"error": f"{type(e).__name__}: {e}",
+                       "status": resp.status_code if 'resp' in locals() else None,
+                       "body_snip": resp.text[:800] if 'resp' in locals() else None}))
 
 if __name__ == "__main__":
     print("🚀 Polling Benzinga every 10s")
