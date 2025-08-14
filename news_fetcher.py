@@ -1,11 +1,7 @@
-import sys, os
-sys.path.insert(0, os.path.dirname(__file__))
-import os, time, json, sqlite3, pytz, requests
+import os, time, json, sqlite3, pytz, requests, xmltodict
 from datetime import timezone
 from dateutil import parser
 from utils.logging import log_db
-import db_bootstrap  # executes and creates tables on import
-import xmltodict
 
 DB_PATH = "data/trades.db"
 BENZINGA_API_KEY = (
@@ -26,18 +22,23 @@ def ensure_tables():
     conn = sqlite3.connect(DB_PATH)
     cur = conn.cursor()
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS news (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        ticker TEXT,
-        headline TEXT,
-        sentiment TEXT,
-        sentiment_score REAL,
-        sentiment_source TEXT,
-        news_time TEXT
-    )
+        CREATE TABLE IF NOT EXISTS news (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT,
+            headline TEXT,
+            sentiment TEXT,
+            sentiment_score REAL,
+            sentiment_source TEXT,
+            news_time TEXT
+        )
     """)
-    conn.commit()
-    conn.close()
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT, level TEXT, component TEXT, event TEXT, message TEXT, ticker TEXT
+        )
+    """)
+    conn.commit(); conn.close()
 
 def save_news_rows(articles):
     conn = sqlite3.connect(DB_PATH)
@@ -65,108 +66,120 @@ def save_news_rows(articles):
                 """
                 INSERT INTO news (ticker, headline, sentiment, sentiment_score, sentiment_source, news_time)
                 VALUES (?, ?, ?, ?, ?, ?)
-                """, (ticker, headline, None, None, "benzinga", news_time_pt)
+                """,
+                (ticker, headline, None, None, "benzinga", news_time_pt)
             )
             inserted += 1
-    conn.commit()
-    conn.close()
+    conn.commit(); conn.close()
     return inserted
+
+def _parse_json_or_xml(resp):
+    """Return a list[dict] articles, normalizing XML shape when needed."""
+    # Try JSON
+    try:
+        data = resp.json()
+        if isinstance(data, dict) and "articles" in data:
+            arts = data.get("articles") or []
+            if isinstance(arts, list):
+                return arts
+        if isinstance(data, list):
+            return data
+    except Exception:
+        pass
+
+    # Fallback to XML
+    try:
+        parsed = xmltodict.parse(resp.text)
+        items = parsed.get("result", {}).get("item", [])
+        if isinstance(items, dict):
+            items = [items]
+        articles = []
+        for it in items:
+            title = it.get("title") or ""
+            # tickers might be under <stocks><item>...</item></stocks>
+            stocks = []
+            stocks_xml = (it.get("stocks") or {}).get("item")
+            if isinstance(stocks_xml, list):
+                stocks = [s for s in stocks_xml if s]
+            elif isinstance(stocks_xml, str):
+                stocks = [stocks_xml]
+            created = it.get("created") or it.get("updated") or ""
+            articles.append({
+                "title": title,
+                "headline": title,
+                "stocks": stocks,
+                "created": created
+            })
+        return articles
+    except Exception:
+        # give back empty to let caller handle logging
+        return []
 
 def fetch_and_log_once():
     ensure_tables()
+
     url = "https://api.benzinga.com/api/v2/news"
     params = {
         "token": BENZINGA_API_KEY,
         "pagesize": 50,
         "display_tickers": "true",
-        "format": "json",                 # <--- force JSON
+        "format": "json",                 # prefer JSON
     }
-    
-    headers = {"Accept": "application/json"}  # <--- hint content type
-    
-    # Log outgoing request
+    headers = {"Accept": "application/json"}
+
+    # Log REQUEST
     try:
         log_db("API", "benzinga", "REQUEST", json.dumps({"url": url, "params": params}))
         start = time.time()
-        resp = requests.get(url, params=params, timeout=15)
+        resp = requests.get(url, params=params, headers=headers, timeout=15)
         elapsed_ms = int((time.time() - start) * 1000)
     except Exception as e:
         log_db("ERROR", "benzinga", "REQUEST_ERROR", f"{type(e).__name__}: {e}")
-        return
+        return  # <-- inside function, OK
 
-# Parse & log the response summary
-try:
-    articles = None
-    # Try JSON first
-    try:
-        data = resp.json()
-        if isinstance(data, dict) and "articles" in data:
-            articles = data.get("articles") or []
-        elif isinstance(data, list):
-            articles = data
-    except Exception:
-        articles = None
-
-    # Fallback to XML if JSON failed or empty
-    if articles is None or len(articles) == 0:
-        try:
-            parsed = xmltodict.parse(resp.text)
-            # Typical shape: result -> item (list)
-            items = parsed.get("result", {}).get("item", [])
-            if isinstance(items, dict):  # single item case
-                items = [items]
-            # Normalize XML items to the JSON-like dicts our saver expects
-            articles = []
-            for it in items:
-                # headline/title
-                title = it.get("title") or ""
-                # tickers (if any) are usually under <stocks><item>...</item></stocks>
-                stocks = []
-                stocks_xml = (it.get("stocks") or {}).get("item")
-                if isinstance(stocks_xml, list):
-                    stocks = [s for s in stocks_xml if s]
-                elif isinstance(stocks_xml, str):
-                    stocks = [stocks_xml]
-                # published/created string e.g., "Thu, 14 Aug 2025 03:54:09 -0400"
-                created = it.get("created") or it.get("updated") or ""
-                articles.append({
-                    "title": title,
-                    "stocks": stocks,
-                    "created": created,
-                    "headline": title,
-                })
-        except Exception as xe:
-            # Could not parse XML either
-            log_db("ERROR", "benzinga", "PARSE_ERROR",
-                   json.dumps({"error": f"{type(xe).__name__}: {xe}",
-                               "status": resp.status_code,
-                               "body_snip": resp.text[:800]}))
-            return
-
+    # Parse RESP
+    articles = _parse_json_or_xml(resp)
     titles_sample = [(a.get("title") or a.get("headline") or "") for a in (articles or [])[:5]]
+
+    # Log RESPONSE summary (even if not 200 to see body)
     log_db("API", "benzinga", "RESPONSE", json.dumps({
-        "request_url": resp.request.url,
+        "request_url": resp.request.url if hasattr(resp, "request") else url,
         "status": resp.status_code,
         "elapsed_ms": elapsed_ms,
         "items": len(articles or []),
         "titles_sample": titles_sample
     }))
 
+    # On HTTP error, log detail and stop
     if resp.status_code != 200:
         log_db("ERROR", "benzinga", "RESPONSE_ERROR",
                json.dumps({"status": resp.status_code, "body": resp.text[:800]}))
-        return
+        return  # <-- inside function, OK
 
-    inserted = save_news_rows(articles or [])
-    log_db("INFO", "benzinga", "INGEST_SUMMARY", f"Inserted {inserted} news rows.")
-except Exception as e:
-    log_db("ERROR", "benzinga", "PARSE_ERROR",
-           json.dumps({"error": f"{type(e).__name__}: {e}",
-                       "status": resp.status_code if 'resp' in locals() else None,
-                       "body_snip": resp.text[:800] if 'resp' in locals() else None}))
+    # If parsing failed/empty, log and stop
+    if not articles:
+        log_db("ERROR", "benzinga", "PARSE_ERROR",
+               json.dumps({"error": "No articles parsed", "body_snip": resp.text[:800]}))
+        return  # <-- inside function, OK
+
+    # Save rows
+    try:
+        inserted = save_news_rows(articles)
+        log_db("INFO", "benzinga", "INGEST_SUMMARY", f"Inserted {inserted} news rows.")
+    except Exception as e:
+        log_db("ERROR", "benzinga", "PARSE_ERROR",
+               json.dumps({"error": f"{type(e).__name__}: {e}", "body_snip": resp.text[:800]}))
+        # don't re-raise, just return
+        return  # <-- inside function, OK
 
 if __name__ == "__main__":
+    ensure_tables()
     print("🚀 Polling Benzinga every 10s")
     while True:
-        fetch_and_log_once()
+        try:
+            fetch_and_log_once()
+        except Exception as e:
+            # final guard so one bad loop doesn't kill the poller
+            log_db("ERROR", "benzinga", "UNHANDLED", f"{type(e).__name__}: {e}")
         time.sleep(10)
+
